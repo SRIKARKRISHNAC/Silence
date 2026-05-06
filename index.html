@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Silence - Smart Environment Analyzer</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <!-- Leaflet Heatmap Plugin -->
+    <script src="https://leaflet.github.io/Leaflet.heat/dist/leaflet-heat.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: white;
+            margin: 0;
+            padding: 0;
+        }
+
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+            z-index: 0;
+            border-radius: 0 0 0 24px;
+        }
+
+        .hidden-section {
+            display: none !important;
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.4s ease-out forwards;
+        }
+
+        .page-section {
+            min-height: 100vh;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            padding-top: 80px;
+        }
+
+        .bg-overlay {
+            position: absolute;
+            inset: 0;
+            background-size: cover;
+            background-position: center;
+            opacity: 0.15;
+            z-index: -1;
+        }
+
+        #notification-toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            display: none;
+        }
+
+        .measuring-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.9);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(8px);
+        }
+
+        .result-card {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .marker-pulse {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 30px;
+            height: 30px;
+            background: rgba(16, 185, 129, 0.4);
+            border-radius: 50%;
+            animation: ripple 2.5s infinite;
+        }
+
+        @keyframes ripple {
+            0% {
+                transform: translate(-50%, -50%) scale(0.5);
+                opacity: 1;
+            }
+
+            100% {
+                transform: translate(-50%, -50%) scale(3);
+                opacity: 0;
+            }
+        }
+
+        .ai-loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, .3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .history-item {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 10px 0;
+        }
+
+        .history-item:last-child {
+            border-bottom: none;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+
+<body class="h-screen flex flex-col overflow-x-hidden">
+
+    <!-- NOTIFICATION TOAST -->
+    <div id="notification-toast"
+        class="glass-panel px-6 py-3 rounded-full shadow-2xl border-emerald-500/50 text-emerald-400 text-sm font-medium">
+        <span id="notification-msg"></span>
+    </div>
+
+    <!-- NAVIGATION -->
+    <nav class="fixed top-0 w-full z-50 glass-panel px-6 py-4 flex justify-between items-center shadow-lg">
+        <div class="text-xl font-bold text-white flex items-center gap-2 tracking-widest uppercase cursor-pointer"
+            onclick="navigateTo('landing-page')">
+            <svg class="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z">
+                </path>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"></path>
+            </svg>
+            Silence
+        </div>
+        <div id="nav-buttons" class="flex items-center gap-4"></div>
+    </nav>
+
+    <!-- LANDING -->
+    <section id="landing-page" class="page-section">
+        <div class="bg-overlay"
+            style="background-image: url('https://images.unsplash.com/photo-1518173946687-a4c8892bbd9f?q=80&w=2070&auto=format&fit=crop');">
+        </div>
+        <div class="z-10 text-center max-w-2xl px-6 fade-in">
+            <h1
+                class="text-5xl md:text-7xl font-bold mb-6 bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-cyan-500 leading-tight">
+                Find Your Quiet.</h1>
+            <p class="text-gray-300 text-lg md:text-xl mb-10 max-w-lg mx-auto">Analyze your surroundings and contribute
+                to the global silence map using Gemini-powered AI.</p>
+            <button onclick="navigateTo('login-page')"
+                class="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-4 px-10 rounded-full transition transform hover:scale-105 shadow-lg shadow-emerald-500/30">Enter
+                Silence</button>
+        </div>
+    </section>
+
+    <!-- LOGIN -->
+    <section id="login-page" class="hidden-section page-section">
+        <div class="bg-overlay"
+            style="background-image: url('https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?q=80&w=2074&auto=format&fit=crop');">
+        </div>
+        <div class="z-10 glass-panel p-8 md:p-10 rounded-2xl w-full max-w-md mx-4 fade-in text-center shadow-2xl">
+            <h2 class="text-3xl font-bold mb-2 text-white">Welcome Back</h2>
+            <p class="text-gray-400 text-sm mb-6">Access your personalized noise profile</p>
+            <form onsubmit="handleLogin(event)" class="space-y-4 text-left">
+                <input type="email" id="login-email" required placeholder="Email Address"
+                    class="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 text-white transition">
+                <input type="password" id="login-password" required placeholder="Password"
+                    class="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 text-white transition">
+                <button type="submit"
+                    class="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 rounded-xl transition">Start
+                    Session</button>
+            </form>
+            <p class="mt-6 text-sm text-gray-400">
+                New to Silence? <a href="#" onclick="navigateTo('signup-page')"
+                    class="text-emerald-400 font-bold hover:underline">Create an account</a>
+            </p>
+        </div>
+    </section>
+
+    <!-- SIGN UP -->
+    <section id="signup-page" class="hidden-section page-section">
+        <div class="bg-overlay"
+            style="background-image: url('https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=2070&auto=format&fit=crop');">
+        </div>
+        <div class="z-10 glass-panel p-8 md:p-10 rounded-2xl w-full max-w-md mx-4 fade-in text-center shadow-2xl">
+            <h2 class="text-3xl font-bold mb-2 text-white">Join Silence</h2>
+            <p class="text-gray-400 text-sm mb-6">Start contributing to the quiet map</p>
+            <form onsubmit="handleSignup(event)" class="space-y-4 text-left">
+                <input type="text" id="signup-name" required placeholder="Full Name"
+                    class="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 text-white transition">
+                <input type="email" id="signup-email" required placeholder="Email Address"
+                    class="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 text-white transition">
+                <input type="password" id="signup-password" required placeholder="Create Password"
+                    class="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 text-white transition">
+                <button type="submit"
+                    class="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-3 rounded-xl transition">Create
+                    Account</button>
+            </form>
+            <p class="mt-6 text-sm text-gray-400">
+                Already a member? <a href="#" onclick="navigateTo('login-page')"
+                    class="text-emerald-400 font-bold hover:underline">Sign In</a>
+            </p>
+        </div>
+    </section>
+
+    <!-- DASHBOARD -->
+    <section id="dashboard-page" class="hidden-section flex-1 flex flex-col md:flex-row pt-16 relative">
+
+        <!-- MEASUREMENT UI -->
+        <div id="measuring-ui" class="measuring-overlay hidden-section">
+            <div class="text-center">
+                <div class="text-emerald-400 text-7xl font-bold mb-4" id="measure-timer">10</div>
+                <h3 class="text-2xl font-bold mb-2">Analyzing Environment...</h3>
+                <p class="text-gray-400">Keep quiet for the most accurate noise reading.</p>
+                <div class="mt-8 flex gap-3 justify-center">
+                    <div class="w-3 h-10 bg-emerald-500 animate-bounce" style="animation-delay: 0.1s"></div>
+                    <div class="w-3 h-16 bg-emerald-500 animate-bounce" style="animation-delay: 0.2s"></div>
+                    <div class="w-3 h-10 bg-emerald-500 animate-bounce" style="animation-delay: 0.3s"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- RESULTS MODAL -->
+        <div id="result-ui" class="measuring-overlay hidden-section p-6 overflow-y-auto">
+            <div class="result-card p-8 rounded-3xl w-full max-w-lg shadow-2xl fade-in border border-emerald-500/30">
+                <h2 class="text-3xl font-bold mb-6 text-emerald-400 flex items-center gap-3">
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Data Collected
+                </h2>
+                <div class="grid grid-cols-2 gap-4 mb-6">
+                    <div class="bg-slate-800/50 p-5 rounded-2xl border border-slate-700">
+                        <p class="text-xs text-gray-400 uppercase font-bold mb-1">Average</p>
+                        <p class="text-3xl font-mono text-white" id="res-avg">0 dB</p>
+                    </div>
+                    <div class="bg-slate-800/50 p-5 rounded-2xl border border-slate-700">
+                        <p class="text-xs text-gray-400 uppercase font-bold mb-1">Peak</p>
+                        <p class="text-3xl font-mono text-white" id="res-peak">0 dB</p>
+                    </div>
+                    <div class="bg-slate-800/50 p-4 rounded-2xl border border-slate-700 col-span-2">
+                        <p class="text-xs text-gray-400 uppercase font-bold mb-1">Heatmap Location</p>
+                        <p class="text-sm font-medium text-emerald-300" id="res-loc">Analyzing coordinates...</p>
+                    </div>
+                </div>
+
+                <div class="bg-emerald-500/5 border border-emerald-500/20 p-5 rounded-2xl mb-6 min-h-[120px]">
+                    <span class="text-xs font-bold text-emerald-400 uppercase flex items-center gap-1 mb-2">✨ AI
+                        Insight</span>
+                    <p id="res-verdict" class="text-sm leading-relaxed text-gray-300 italic">Processing analysis via
+                        AI...</p>
+                </div>
+
+                <button onclick="closeResults()"
+                    class="w-full bg-emerald-500 py-4 rounded-2xl font-bold hover:bg-emerald-600 transition shadow-lg shadow-emerald-500/20">Update
+                    Global Heatmap</button>
+            </div>
+        </div>
+
+        <!-- Sidebar -->
+        <aside class="w-full md:w-80 p-6 flex flex-col gap-5 z-10 bg-slate-900 border-r border-slate-800">
+            <button onclick="startAnalysis()"
+                class="w-full py-4 bg-gradient-to-r from-emerald-500 to-teal-600 rounded-2xl font-bold text-white shadow-lg shadow-emerald-500/20 transform hover:scale-[1.02] transition active:scale-95">
+                Run 10s Analysis
+            </button>
+
+            <div class="glass-panel p-5 rounded-xl border-l-4 border-emerald-500">
+                <h3 class="text-emerald-400 font-bold text-xs uppercase mb-2">Live Sensors</h3>
+                <div class="space-y-6 mt-4">
+                    <div>
+                        <div class="flex justify-between text-xs mb-2">
+                            <span class="text-gray-300 font-bold uppercase tracking-wider">Noise Level</span>
+                            <span id="val-noise" class="text-emerald-400 font-mono font-bold">0 dB</span>
+                        </div>
+                        <div class="w-full bg-slate-800 rounded-full h-3 overflow-hidden border border-slate-700">
+                            <div id="bar-noise" class="bg-emerald-500 h-full transition-all duration-150"
+                                style="width: 0%"></div>
+                        </div>
+                        <div class="flex justify-between text-[10px] text-gray-500 mt-1">
+                            <span>0 dB</span>
+                            <span>Limit: 300 dB</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Sidebar -->
+            <div class="glass-panel p-5 rounded-xl flex-1 flex flex-col overflow-hidden">
+                <h3 class="text-gray-400 font-bold text-xs uppercase mb-3 text-emerald-400">Map History</h3>
+                <div id="history-count" class="text-xs text-gray-400 mb-4">0 samples captured</div>
+                <div id="history-list-container" class="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                    <div id="history-list" class="space-y-3">
+                        <!-- Items injected by JS -->
+                        <div class="text-[10px] text-gray-600 italic">No measurements yet.</div>
+                    </div>
+                </div>
+            </div>
+
+            <button onclick="logout()"
+                class="w-full py-3 bg-red-900/10 hover:bg-red-900/30 text-red-400 text-xs font-bold uppercase rounded-xl border border-red-900/30 transition">Logout</button>
+        </aside>
+
+        <!-- Map -->
+        <main class="flex-1 relative bg-slate-900">
+            <div id="map"></div>
+            <div id="location-status"
+                class="absolute top-4 right-4 glass-panel px-4 py-2 rounded-full z-10 text-[10px] font-bold uppercase flex items-center gap-2 border-slate-700">
+                <span id="loc-dot" class="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span>
+                <span id="loc-text" class="text-gray-300">Searching GPS...</span>
+            </div>
+        </main>
+    </section>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://leaflet.github.io/Leaflet.heat/dist/leaflet-heat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <script>
+        const supabaseUrl = 'https://mnjzzlhvgpcjknotsjxt.supabase.co';
+        const supabaseKey = 'sb_publishable_jRmJiPOmvcUk4yoqPwTt5w_i3qLwNbO'; // Replace with your actual anon key
+        const supabaseClient = window.supabase.createClient(supabaseUrl, supabaseKey);
+
+        // Backend API Config
+        const AI_CONFIG = {
+            baseUrl: "http://localhost:3000/api/chat"
+        };
+
+        let currentUser = null;
+        let map, heatLayer, userMarker;
+        let audioContext, analyser, microphone, javascriptNode;
+        let currentPos = { lat: 0, lng: 0 };
+        let currentAddress = "Unknown Location";
+
+        let noiseHistory = [];
+        let globalHeatData = [];
+        let historyLog = []; // Metadata for the sidebar list
+        let isMeasuring = false;
+
+        const DB_LIMIT = 300;
+
+        async function navigateTo(pageId) {
+            if (pageId === 'dashboard-page') {
+                const { data } = await supabaseClient.auth.getSession();
+                if (!data.session) {
+                    showNotification("Unauthorized access. Please sign in.");
+                    pageId = 'login-page';
+                } else {
+                    currentUser = data.session.user.user_metadata?.full_name || data.session.user.email || "User";
+                }
+            }
+
+            document.querySelectorAll('section').forEach(s => s.classList.add('hidden-section'));
+            const target = document.getElementById(pageId);
+            if (target) {
+                target.classList.remove('hidden-section');
+                target.classList.add('fade-in');
+            }
+            if (pageId === 'dashboard-page') {
+                setTimeout(() => initMap(), 200);
+                startMicrophone();
+                loadSupabaseData();
+            }
+            updateNav();
+        }
+
+        function updateNav() {
+            const container = document.getElementById('nav-buttons');
+            if (!container) return;
+            if (currentUser) {
+                container.innerHTML = `<div class="bg-slate-800 px-4 py-2 rounded-full text-sm font-bold text-emerald-400 border border-slate-700">${currentUser}</div>`;
+            } else {
+                container.innerHTML = `<button onclick="navigateTo('login-page')" class="text-sm font-bold hover:text-emerald-400 transition">Sign In</button>`;
+            }
+        }
+
+        function showNotification(msg) {
+            const toast = document.getElementById('notification-toast');
+            if (!toast) return;
+            document.getElementById('notification-msg').innerText = msg;
+            toast.style.display = 'block';
+            setTimeout(() => toast.style.display = 'none', 3000);
+        }
+
+        async function loadSupabaseData() {
+            try {
+                const { data, error } = await supabaseClient.from('noise_logs').select('*').order('created_at', { ascending: false });
+                if (data && data.length > 0) {
+                    historyLog = data.map(row => {
+                        const d = new Date(row.created_at);
+                        return {
+                            time: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                            date: d.toLocaleDateString(),
+                            db: row.avg_db,
+                            location: row.address
+                        };
+                    });
+                    globalHeatData = data.map(row => [row.lat, row.lng, row.avg_db / DB_LIMIT]);
+                    updateHistorySidebar();
+                    if (heatLayer) {
+                        heatLayer.setLatLngs(globalHeatData);
+                    }
+                }
+            } catch (err) {
+                console.error("Supabase load error:", err);
+            }
+        }
+
+        // --- UPDATED AI API CALL (Via Local Backend) ---
+        async function callAI(prompt) {
+            try {
+                const response = await fetch(AI_CONFIG.baseUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ prompt: prompt })
+                });
+
+                if (!response.ok) {
+                    const errorMsg = await response.text();
+                    console.error("API Error Response:", errorMsg);
+                    throw new Error("Failed to reach backend server.");
+                }
+
+                const result = await response.json();
+                return result.choices?.[0]?.message?.content || "AI could not generate a response.";
+            } catch (err) {
+                console.error("Connectivity Details:", err);
+                return "AI connectivity issue. Please ensure your local backend server is running.";
+            }
+        }
+
+        // --- CORE LOGIC ---
+        function startAnalysis() {
+            if (isMeasuring || !currentPos.lat) {
+                if (!currentPos.lat) showNotification("Wait for GPS lock before analysis.");
+                return;
+            }
+            isMeasuring = true;
+            noiseHistory = [];
+
+            const overlay = document.getElementById('measuring-ui');
+            const timerLabel = document.getElementById('measure-timer');
+            overlay.classList.remove('hidden-section');
+
+            let timeLeft = 10;
+            timerLabel.innerText = timeLeft;
+
+            const interval = setInterval(() => {
+                timeLeft--;
+                timerLabel.innerText = timeLeft;
+                if (timeLeft <= 0) {
+                    clearInterval(interval);
+                    finishAnalysis();
+                }
+            }, 1000);
+        }
+
+        async function finishAnalysis() {
+            isMeasuring = false;
+            document.getElementById('measuring-ui').classList.add('hidden-section');
+
+            const avg = noiseHistory.length ? Math.round(noiseHistory.reduce((a, b) => a + b) / noiseHistory.length) : 0;
+            const peak = Math.max(...(noiseHistory.length ? noiseHistory : [0]));
+
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const dateStr = now.toLocaleDateString();
+
+            // Add to Heatmap
+            globalHeatData.push([currentPos.lat, currentPos.lng, avg / DB_LIMIT]);
+
+            // Add to History Metadata
+            historyLog.unshift({
+                time: timeStr,
+                date: dateStr,
+                db: avg,
+                location: currentAddress
+            });
+
+            // Update UI
+            document.getElementById('res-avg').innerText = `${avg} dB`;
+            document.getElementById('res-peak').innerText = `${peak} dB`;
+            document.getElementById('res-loc').innerText = currentAddress;
+            updateHistorySidebar();
+
+            document.getElementById('result-ui').classList.remove('hidden-section');
+            if (heatLayer) heatLayer.setLatLngs(globalHeatData);
+
+            // Fetch AI Insight
+            const insight = await callAI(`I analyzed noise at ${currentAddress}. Average: ${avg}dB, Peak: ${peak}dB. Analyze this environment for long term health impacts.`);
+            document.getElementById('res-verdict').innerText = insight;
+
+            // Save to Supabase
+            const { error: dbError } = await supabaseClient.from('noise_logs').insert([{
+                lat: currentPos.lat,
+                lng: currentPos.lng,
+                avg_db: avg,
+                peak_db: peak,
+                address: currentAddress,
+                insight: insight
+            }]);
+            if (dbError) {
+                console.error("Supabase save error:", dbError);
+            }
+        }
+
+        function updateHistorySidebar() {
+            const countEl = document.getElementById('history-count');
+            const listEl = document.getElementById('history-list');
+
+            countEl.innerText = `${historyLog.length} samples captured`;
+
+            if (historyLog.length === 0) {
+                listEl.innerHTML = `<div class="text-[10px] text-gray-600 italic">No measurements yet.</div>`;
+                return;
+            }
+
+            listEl.innerHTML = historyLog.map(item => `
+                <div class="history-item animate-fade-in border-l-2 border-emerald-500/30 pl-3 bg-slate-800/20 rounded-r-md py-2">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-emerald-400 font-bold text-xs">${item.db} dB</span>
+                        <span class="text-gray-500 text-[9px]">${item.date} | ${item.time}</span>
+                    </div>
+                    <div class="text-gray-400 truncate w-full italic text-[9px]">${item.location}</div>
+                </div>
+            `).join('');
+        }
+
+        function closeResults() {
+            document.getElementById('result-ui').classList.add('hidden-section');
+            showNotification("History & Heatmap updated.");
+        }
+
+        function startMicrophone() {
+            if (audioContext) {
+                if (audioContext.state === 'suspended') audioContext.resume();
+                return;
+            }
+            navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                microphone = audioContext.createMediaStreamSource(stream);
+                javascriptNode = audioContext.createScriptProcessor(2048, 1, 1);
+
+                analyser.smoothingTimeConstant = 0.8;
+                analyser.fftSize = 1024;
+
+                microphone.connect(analyser);
+                analyser.connect(javascriptNode);
+                javascriptNode.connect(audioContext.destination);
+
+                javascriptNode.onaudioprocess = () => {
+                    const array = new Uint8Array(analyser.frequencyBinCount);
+                    analyser.getByteFrequencyData(array);
+
+                    let sum = 0;
+                    for (let i = 0; i < array.length; i++) { sum += array[i] * array[i]; }
+                    const rms = Math.sqrt(sum / array.length);
+
+                    let db = rms > 0 ? Math.round(20 * Math.log10(rms)) + 30 : 0;
+                    db = Math.min(db, DB_LIMIT);
+
+                    const noiseVal = document.getElementById('val-noise');
+                    const noiseBar = document.getElementById('bar-noise');
+                    if (noiseVal) noiseVal.innerText = `${db} dB`;
+                    if (noiseBar) {
+                        const percentage = (db / DB_LIMIT) * 100;
+                        noiseBar.style.width = `${percentage}%`;
+                        if (db < 90) noiseBar.className = "bg-emerald-500 h-full transition-all duration-150";
+                        else if (db < 180) noiseBar.className = "bg-yellow-500 h-full transition-all duration-150";
+                        else noiseBar.className = "bg-red-500 h-full transition-all duration-150 shadow-[0_0_10px_rgba(239,68,68,0.5)]";
+                    }
+
+                    if (isMeasuring) noiseHistory.push(db);
+                }
+            }).catch(() => showNotification("Microphone access denied."));
+        }
+
+        function initMap() {
+            if (map) return;
+            map = L.map('map', { zoomControl: false }).setView([20, 0], 2);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: '&copy; CARTO' }).addTo(map);
+
+            heatLayer = L.heatLayer(globalHeatData, {
+                radius: 35,
+                blur: 25,
+                maxZoom: 17,
+                gradient: { 0.4: 'blue', 0.6: 'lime', 0.9: 'red' }
+            }).addTo(map);
+
+            if (navigator.geolocation) {
+                navigator.geolocation.watchPosition(pos => {
+                    currentPos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                    if (currentAddress === "Unknown Location") map.setView([currentPos.lat, currentPos.lng], 16);
+
+                    const dot = document.getElementById('loc-dot');
+                    const text = document.getElementById('loc-text');
+                    if (dot) dot.className = "w-2 h-2 bg-emerald-500 rounded-full";
+
+                    if (userMarker) {
+                        userMarker.setLatLng([currentPos.lat, currentPos.lng]);
+                    } else {
+                        const icon = L.divIcon({
+                            className: 'relative',
+                            html: `<div class="marker-pulse"></div><svg viewBox="0 0 24 24" class="w-10 h-10 drop-shadow-xl" xmlns="http://www.w3.org/2000/svg"><path d="M12 21.7C16 17.7 20 14.1 20 9.7C20 5.3 16.4 1.7 12 1.7C7.6 1.7 4 5.3 4 9.7C4 14.1 8 17.7 12 21.7Z" fill="#10b981" stroke="white" stroke-width="2.5"/><circle cx="12" cy="9.7" r="3.5" fill="white"/></svg>`,
+                            iconSize: [40, 40], iconAnchor: [20, 40]
+                        });
+                        userMarker = L.marker([currentPos.lat, currentPos.lng], { icon: icon }).addTo(map);
+                    }
+
+                    fetch(`https://nominatim.openstreetmap.org/reverse?lat=${currentPos.lat}&lon=${currentPos.lng}&format=json`)
+                        .then(r => r.json()).then(data => {
+                            currentAddress = data.display_name.split(',').slice(0, 2).join(',');
+                            if (text) { text.innerText = currentAddress; text.className = "text-emerald-400"; }
+                        });
+                }, null, { enableHighAccuracy: true });
+            }
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+
+            if (error) {
+                showNotification(error.message);
+            } else {
+                currentUser = data.user?.user_metadata?.full_name || email.split('@')[0] || "User";
+                navigateTo('dashboard-page');
+            }
+        }
+
+        async function handleSignup(e) {
+            e.preventDefault();
+            const email = document.getElementById('signup-email').value;
+            const password = document.getElementById('signup-password').value;
+            const { data, error } = await supabaseClient.auth.signUp({ email, password });
+
+            if (error) {
+                showNotification(error.message);
+            } else {
+                showNotification("Success! You can now log in.");
+                if (data.session) {
+                    currentUser = document.getElementById('signup-name').value || "New User";
+                    navigateTo('dashboard-page');
+                }
+            }
+        }
+
+        async function logout() {
+            await supabaseClient.auth.signOut();
+            currentUser = null;
+            navigateTo('landing-page');
+        }
+
+        window.onload = () => navigateTo('landing-page');
+    </script>
+</body>
+
+</html>
